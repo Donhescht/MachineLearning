@@ -11,11 +11,8 @@ in 19622 observations of 160 variables.
 
 Installation
 
-TODO: Describe the installation process
-
-Going to the directory with browser should bring up the index file.
-
-TODO: Write usage instructions
+TODO: 
+https://donhescht.github.io/MachineLearning/
 
 Contributing
 Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. 
