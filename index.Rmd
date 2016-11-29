@@ -1,0 +1,116 @@
+---
+title: "Predicting Curl Quality"
+author: "Donald Hescht"
+date: "11/29/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=F, warning=F)
+```
+```{r echo = FALSE}
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(pgmm)
+library(rpart)
+library(rpart.plot)
+library(gbm)
+library(e1071)
+library(corrplot)
+
+```
+
+```{r echo = FALSE}
+# Read and clean data set.  Remove all columns that have NA or divide by zero.
+set.seed(19651)
+liftData <- read.csv("pml-training.csv", na.strings=c("#DIV/0", '', 'NA') ,stringsAsFactors = F)
+liftData <- subset(liftData, select = -c(X, raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp, new_window, num_window))
+liftData$classe <- as.factor(liftData$classe)
+liftData <- liftData[,colSums(is.na(liftData))==0]
+
+#split ito training and testing 
+inTrain <- createDataPartition(liftData$classe, p = 3/4)[[1]]
+Training <- liftData[ inTrain,]
+Testing <- liftData[-inTrain,]
+```
+
+# Summary
+This paper describes the author's approach to designing a 99% accurate model for predicting curl exercise type as defined in the paper "Qualitative Activity Recognition of Weight Lifting Exercises" [1].  This activity's data was captured by sampling 6 lifters with 4 attached sensors.  These sensors were attached to the lifter's forearm, arm, belt and dumbbell.  They were then monitored while performing 5 distinct curl exercises: one that was "correct" and four others with distinct errors.  The aggregate of these sensor data and post calculations resulted in 19622 observations of 160 variables.   
+
+# Cleaning and Analysis
+The lift data contains N/As and divide by zero errors.  These values were caused by post calculations to create summary type data (max/mins and other stats) from the original sensors data.  After removing these feature columns the actual sensor information still present.  Post cleaning two data sets were created: Training (`r dim(Training)`) and Testing (`r dim(Testing)`).   
+
+To Correlation Plot (with main diagonal of ones removed) shows the "cleaned" 53 features correlated to the "classe"" output.  Notice that there is no strong correlation with the "classe" out come.  This indicates quite a few input variables will be required to create a 99% accurate model.  This feature selection occurs in the section.
+
+```{r echo = FALSE, fig.height=8, fig.width=8}
+# Look at correlation of classe to Features
+x <-matrix(LETTERS[1:9], ncol=3)
+LD.CorrM <- Training
+LD.CorrM$classe <- as.numeric(match(LD.CorrM$classe,x))
+LD.Corr <- cor(LD.CorrM[,-1])
+diag(LD.Corr)<-0
+corrplot(LD.Corr)
+```
+
+# Model Generation
+
+```{r echo = FALSE}
+# Create feature formula that correlate highest while still providing 99% accuracy 
+AllFeatures <- names(sort(abs(LD.Corr["classe",]), decreasing = TRUE))
+Features <- AllFeatures[1:37]
+Formula <- as.formula(paste("classe", paste(Features, collapse="+"), sep = " ~ "))
+```
+
+The author used the Random Forest algorithm for its accuracy and general lack of bias.  (The reduction in bias is a result of it keeping out a portion of the training data to ensure good out of sample accuracy.)  The features for the Random Forest were then found by ordering by their absolute correlation value (as found in the previous section). The author then off-line picked the highest correlated features to reduce features from `r length(AllFeatures )` to  `r length(Features)` while keeping 99% accuracy.  
+
+The final Random Forest **features = ** 
+
+**{ `r Features`}**
+
+```{r echo=TRUE}
+set.seed(19652)
+Training.Rf <- randomForest(Formula, data=Training, mtry=as.integer(sqrt(length(Features))), importance=TRUE)
+Training.Rf
+```
+
+The **Random Forest output above predicts** the Out Of Bag error (OOB) or **out of sample error is less than 1%**. The final model individual classification errors (A-E) are plotted below showing each run close to a 99% accuracy. (A later project might consider the effect of reducing the number of trees but this was not performed since time to build the model was not specified.) 
+
+```{r echo=FALSE}
+plot(Training.Rf, main="Classification Errors For Each classe")
+```
+
+The importance of features to accuracy is shown below.  Removing even the least "important" features edged the model to approach or cross the required accuracy of 99%.  Likewise, though there is a strong cross correlation between the Euler Angles and the raw values, removing them quickly caused the model accuracy to reduce below 99% accuracy. Therefore, the author kept the correlation ordered `r length(Features)` features.
+
+
+```{r echo=FALSE, fig.height=8, fig.width=6}
+varImpPlot(Training.Rf, sort=TRUE, type = 1)
+```
+
+# Cross Validation
+
+```{r echo = TRUE}
+# Function to report accuracy of model
+set.seed(19653)
+Training.Test.Pred <- predict(Training.Rf, Testing)
+ctable <- table(Training.Test.Pred, Testing$classe) 
+Testing.Acc <-  sum(diag(ctable)) / sum(ctable)
+Training.OOB.Acc <- sum(diag(Training.Rf$confusion[,1:5])) / sum(Training.Rf$confusion[,1:5])
+```
+
+The Random Forest model was validated by using a 25% hold out of the "pml-training.csv" training data. Using this hold out data gives an out of sample accuracy of **`r Testing.Acc `**. This closely matches the accuracy given by the Random Forest Training Confusion Matrix **(`r Training.OOB.Acc`)** which is ~(1 - OOB error). 
+
+# Test Data
+Running the 20 test cases.
+```{r echo = TRUE}
+set.seed(19654)
+testData <- read.csv("pml-testing.csv", na.strings=c("#DIV/0", '', 'NA') ,stringsAsFactors = F)
+predict(Training.Rf, testData)
+
+```
+# Citations
+[1] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4QYU9sHrZ
+
+[2] https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
